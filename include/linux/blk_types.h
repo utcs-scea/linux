@@ -74,6 +74,7 @@ struct block_device {
 #ifdef CONFIG_SECURITY
 	void			*bd_security;
 #endif
+	atomic_t		queued_segments;
 	/*
 	 * keep this out-of-line as it's both big and not needed in the fast
 	 * path
