@@ -766,6 +766,59 @@ struct read_balance_ctl {
 	int readable_disks;
 };
 
+
+#define BLOCK_IO_QUEUE_THRESHOLD 225 // 255
+
+int choose_best_ssd_rdev(struct r1conf *conf, struct r1bio *r1_bio);
+int choose_best_ssd_rdev(struct r1conf *conf, struct r1bio *r1_bio)
+{
+	int raid_disks;
+	int start_disk;
+	int min_disk;
+	int min_pending;
+	struct md_rdev *rdev;
+
+	raid_disks = conf->raid_disks;
+	start_disk = get_random_u32_below(raid_disks);
+	rdev = conf->mirrors[start_disk].rdev;
+
+	if (r1_bio->bios[start_disk] != IO_BLOCKED && rdev_readable(rdev, r1_bio) && rdev->bdev != NULL && atomic_read(&rdev->bdev->queued_segments) <= BLOCK_IO_QUEUE_THRESHOLD)
+		return start_disk;
+	min_disk = -1;
+	min_pending = UINT_MAX;
+
+	for (int disk_count = 0 ; disk_count < raid_disks ; disk_count++ ) {
+		int disk;
+		int pending;
+
+		disk = (start_disk + disk_count) % raid_disks;
+		if (r1_bio->bios[disk] == IO_BLOCKED)
+		{
+			continue;
+		}
+
+		rdev = conf->mirrors[disk].rdev;
+		if (!rdev_readable(rdev, r1_bio))
+		{
+			continue;
+		}
+		if (rdev->bdev == NULL)
+		{
+			continue;
+		}
+		pending = atomic_read(&rdev->bdev->queued_segments);
+		if (pending <= BLOCK_IO_QUEUE_THRESHOLD)
+			return disk;
+		if (pending < min_pending)
+		{
+			min_disk = disk;
+			min_pending = pending;
+		}
+	}
+	return min_disk;
+}
+EXPORT_SYMBOL_GPL(choose_best_ssd_rdev);
+
 static int choose_best_rdev(struct r1conf *conf, struct r1bio *r1_bio)
 {
 	int disk;
@@ -780,7 +833,7 @@ static int choose_best_rdev(struct r1conf *conf, struct r1bio *r1_bio)
 	for (disk = 0 ; disk < conf->raid_disks * 2 ; disk++) {
 		struct md_rdev *rdev;
 		sector_t dist;
-		unsigned int pending;
+		int pending;
 
 		if (r1_bio->bios[disk] == IO_BLOCKED)
 			continue;
@@ -793,7 +846,8 @@ static int choose_best_rdev(struct r1conf *conf, struct r1bio *r1_bio)
 		if (ctl.readable_disks++ == 1)
 			set_bit(R1BIO_FailFast, &r1_bio->state);
 
-		pending = atomic_read(&rdev->nr_pending);
+		// pending = atomic_read(&rdev->nr_pending);
+		pending = atomic_read(&rdev->bdev->queued_segments);
 		dist = abs(r1_bio->sector - conf->mirrors[disk].head_position);
 
 		/* Don't change to another disk for sequential reads */
@@ -844,6 +898,8 @@ static int choose_best_rdev(struct r1conf *conf, struct r1bio *r1_bio)
 		return ctl.closest_dist_disk;
 }
 
+int read_balance_raid1(struct r1conf *conf, struct r1bio *r1_bio,
+			int *max_sectors);
 /*
  * This routine returns the disk from which the requested read should be done.
  *
@@ -862,24 +918,24 @@ static int choose_best_rdev(struct r1conf *conf, struct r1bio *r1_bio)
  *
  * The rdev for the device selected will have nr_pending incremented.
  */
-static int read_balance(struct r1conf *conf, struct r1bio *r1_bio,
+int read_balance_raid1(struct r1conf *conf, struct r1bio *r1_bio,
 			int *max_sectors)
 {
 	int disk;
 
 	clear_bit(R1BIO_FailFast, &r1_bio->state);
 
-	if (raid1_should_read_first(conf->mddev, r1_bio->sector,
-				    r1_bio->sectors))
-		return choose_first_rdev(conf, r1_bio, max_sectors);
-
-	disk = choose_best_rdev(conf, r1_bio);
+	disk = choose_best_ssd_rdev(conf, r1_bio);
 	if (disk >= 0) {
 		*max_sectors = r1_bio->sectors;
 		update_read_sectors(conf, disk, r1_bio->sector,
 				    r1_bio->sectors);
 		return disk;
 	}
+
+	if (raid1_should_read_first(conf->mddev, r1_bio->sector,
+				    r1_bio->sectors))
+		return choose_first_rdev(conf, r1_bio, max_sectors);
 
 	/*
 	 * If we are here it means we didn't find a perfectly good disk so
@@ -892,6 +948,7 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio,
 
 	return choose_slow_rdev(conf, r1_bio, max_sectors);
 }
+EXPORT_SYMBOL_GPL(read_balance_raid1);
 
 static void wake_up_barrier(struct r1conf *conf)
 {
@@ -1352,7 +1409,7 @@ static void raid1_read_request(struct mddev *mddev, struct bio *bio,
 	 * make_request() can abort the operation when read-ahead is being
 	 * used and no empty request is available.
 	 */
-	rdisk = read_balance(conf, r1_bio, &max_sectors);
+	rdisk = read_balance_raid1(conf, r1_bio, &max_sectors);
 	if (rdisk < 0) {
 		/* couldn't find anywhere to read from */
 		if (r1bio_existed)

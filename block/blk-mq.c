@@ -787,6 +787,13 @@ static void blk_print_req_error(struct request *req, blk_status_t status)
 		IOPRIO_PRIO_CLASS(req->ioprio));
 }
 
+int blk_rq_adjusted_nr_phys_segments(struct request *req)
+{
+	if ((req->cmd_flags & REQ_IDLE) && (req->cmd_flags & REQ_FUA) && (req->cmd_flags & REQ_META))
+		return 0;
+	return blk_rq_nr_phys_segments(req);
+}
+
 /*
  * Fully end IO on a request. Does not support partial completions, or
  * errors.
@@ -797,6 +804,8 @@ static void blk_complete_request(struct request *req)
 	int total_bytes = blk_rq_bytes(req);
 	struct bio *bio = req->bio;
 
+	if (req->part)
+		atomic_sub(blk_rq_adjusted_nr_phys_segments(req), &req->part->queued_segments);
 	trace_block_rq_complete(req, BLK_STS_OK, total_bytes);
 
 	if (!bio)
@@ -866,6 +875,8 @@ bool blk_update_request(struct request *req, blk_status_t error,
 	bool quiet = req->rq_flags & RQF_QUIET;
 	int total_bytes;
 
+	if (req->part)
+		  atomic_sub(blk_rq_adjusted_nr_phys_segments(req), &req->part->queued_segments);
 	trace_block_rq_complete(req, error, nr_bytes);
 
 	if (!req->bio)
@@ -1242,6 +1253,8 @@ void blk_mq_start_request(struct request *rq)
 {
 	struct request_queue *q = rq->q;
 
+	if (rq->part)
+		atomic_add(blk_rq_adjusted_nr_phys_segments(rq), &rq->part->queued_segments);
 	trace_block_rq_issue(rq);
 
 	if (test_bit(QUEUE_FLAG_STATS, &q->queue_flags) &&

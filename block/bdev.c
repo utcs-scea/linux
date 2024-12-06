@@ -432,6 +432,7 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 	atomic_set(&bdev->__bd_flags, partno);
 	bdev->bd_mapping = &inode->i_data;
 	bdev->bd_queue = disk->queue;
+	atomic_set(&bdev->queued_segments, 0);
 	if (partno && bdev_test_flag(disk->part0, BD_HAS_SUBMIT_BIO))
 		bdev_set_flag(bdev, BD_HAS_SUBMIT_BIO);
 	bdev->bd_stats = alloc_percpu(struct disk_stats);
