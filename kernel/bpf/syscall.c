@@ -208,7 +208,9 @@ static int bpf_map_update_value(struct bpf_map *map, struct file *map_file,
 	return err;
 }
 
-static int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
+int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
+			      __u64 flags);
+int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
 			      __u64 flags)
 {
 	void *ptr;
@@ -267,6 +269,7 @@ static int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(bpf_map_copy_value);
 
 /* Please, do not use this function outside from the map creation path
  * (e.g. in map update path) without taking care of setting the active
