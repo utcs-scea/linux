@@ -738,7 +738,7 @@ static bool should_choose_next(struct r1conf *conf, int disk)
 	       mirror->next_seq_sect - opt_iosize >= mirror->seq_start;
 }
 
-static bool rdev_readable(struct md_rdev *rdev, struct r1bio *r1_bio)
+bool rdev_readable(struct md_rdev *rdev, struct r1bio *r1_bio)
 {
 	if (!rdev || test_bit(Faulty, &rdev->flags))
 		return false;
@@ -756,6 +756,7 @@ static bool rdev_readable(struct md_rdev *rdev, struct r1bio *r1_bio)
 
 	return true;
 }
+EXPORT_SYMBOL_GPL(rdev_readable);
 
 struct read_balance_ctl {
 	sector_t closest_dist;
@@ -765,6 +766,10 @@ struct read_balance_ctl {
 	int sequential_disk;
 	int readable_disks;
 };
+
+#include <linux/kermit.h>
+int (*ml_choose_best_rdev_raid1)(struct r1conf *conf, struct r1bio *r1_bio) = NULL;
+EXPORT_SYMBOL_GPL(ml_choose_best_rdev_raid1);
 
 static int choose_best_rdev(struct r1conf *conf, struct r1bio *r1_bio)
 {
@@ -869,11 +874,14 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio,
 
 	clear_bit(R1BIO_FailFast, &r1_bio->state);
 
-	if (raid1_should_read_first(conf->mddev, r1_bio->sector,
+	disk = ML_REPLACE_FUNCTION(int, ml_choose_best_rdev_raid1,
+		ml_choose_best_rdev_raid1(conf, r1_bio),
+		if (raid1_should_read_first(conf->mddev, r1_bio->sector,
 				    r1_bio->sectors))
-		return choose_first_rdev(conf, r1_bio, max_sectors);
+			return choose_first_rdev(conf, r1_bio, max_sectors);
 
-	disk = choose_best_rdev(conf, r1_bio);
+		choose_best_rdev(conf, r1_bio););
+
 	if (disk >= 0) {
 		*max_sectors = r1_bio->sectors;
 		update_read_sectors(conf, disk, r1_bio->sector,
