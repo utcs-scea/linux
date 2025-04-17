@@ -1252,6 +1252,11 @@ out_nolock:
 	return result;
 }
 
+#include <linux/kermit.h>
+int (*ml_referenced_page_limit_collapse)(struct mm_struct *mm,
+		int unmapped, int referenced) = NULL;
+EXPORT_SYMBOL_GPL(ml_referenced_page_limit_collapse);
+
 static int hpage_collapse_scan_pmd(struct mm_struct *mm,
 				   struct vm_area_struct *vma,
 				   unsigned long address, bool *mmap_locked,
@@ -1410,8 +1415,10 @@ static int hpage_collapse_scan_pmd(struct mm_struct *mm,
 	if (!writable) {
 		result = SCAN_PAGE_RO;
 	} else if (cc->is_khugepaged &&
-		   (!referenced ||
-		    (unmapped && referenced < HPAGE_PMD_NR / 2))) {
+		    ML_REPLACE_FUNCTION(int,
+			ml_referenced_page_limit_collapse,
+			ml_referenced_page_limit_collapse(mm, unmapped, referenced),
+		 unmapped && (!referenced || referenced < HPAGE_PMD_NR / 2);)) {
 		result = SCAN_LACK_REFERENCED_PAGE;
 	} else {
 		result = SCAN_SUCCEED;

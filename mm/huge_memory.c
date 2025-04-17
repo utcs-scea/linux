@@ -1269,6 +1269,10 @@ static void set_huge_zero_folio(pgtable_t pgtable, struct mm_struct *mm,
 	mm_inc_nr_ptes(mm);
 }
 
+#include <linux/kermit.h>
+int (*ml_throttle_hugepage_faults)(struct vm_fault *vmf) = NULL;
+EXPORT_SYMBOL_GPL(ml_throttle_hugepage_faults);
+
 vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -1277,7 +1281,11 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 	unsigned long haddr = vmf->address & HPAGE_PMD_MASK;
 	vm_fault_t ret;
 
-	if (!thp_vma_suitable_order(vma, haddr, PMD_ORDER))
+	if (!thp_vma_suitable_order(vma, haddr, PMD_ORDER) ||
+			ML_REPLACE_FUNCTION(int,
+				ml_throttle_hugepage_faults,
+				ml_throttle_hugepage_faults(vmf),
+				0;))
 		return VM_FAULT_FALLBACK;
 	ret = vmf_anon_prepare(vmf);
 	if (ret)
